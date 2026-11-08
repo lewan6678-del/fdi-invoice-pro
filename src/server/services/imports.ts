@@ -51,33 +51,84 @@ async function storeFile(companyId: string, actorId: string | null, name: string
   }
 }
 
-/** Bước 1 (đồng bộ, nhanh): lưu file gốc + tạo job. Xử lý thực hiện ở nền. */
-export async function createImportJob(actor: Actor, companyId: string, files: UploadFile[]) {
+export const CHUNK_BYTES = 3 * 1024 * 1024; // < 4,5MB giới hạn request của Vercel
+
+async function assertCanImport(actor: Actor, companyId: string) {
   await requireCompanyRole(actor, companyId, "EDITOR");
   const company = await prisma.company.findUniqueOrThrow({ where: { id: companyId } });
   if (!company.isActive) throw Errors.validation("Công ty đang ở trạng thái ngừng hoạt động.", "Kích hoạt lại công ty trong mục Quản lý công ty trước khi nhập hóa đơn.");
+}
+
+/** Bước 1a: tạo lượt nhập rỗng (trạng thái UPLOADING). */
+export async function createEmptyJob(actor: Actor, companyId: string) {
+  await assertCanImport(actor, companyId);
+  return prisma.importJob.create({ data: { companyId, createdById: actor.id, status: "UPLOADING" } });
+}
+
+async function getUploadingJob(actor: Actor, companyId: string, jobId: string) {
+  await assertCanImport(actor, companyId);
+  const job = await prisma.importJob.findFirst({ where: { id: jobId, companyId } });
+  if (!job) throw Errors.notFound("Lượt nhập");
+  if (job.status !== "UPLOADING") throw Errors.conflict("Lượt nhập đã được xác nhận, không thể thêm file.", "Tạo lượt nhập mới.");
+  return job;
+}
+
+/** Bước 1b: thêm một file hoàn chỉnh vào lượt nhập (lưu file gốc bất biến + tạo dòng chờ xử lý). */
+export async function addFileToJob(actor: Actor, companyId: string, jobId: string, f: UploadFile) {
+  await getUploadingJob(actor, companyId, jobId);
+  const order = await prisma.importItem.count({ where: { jobId } });
+  const kind = detectKind(f.name, f.data);
+  const base = { jobId, companyId, fileName: f.name.slice(0, 500), kind, sortOrder: order };
+  if (f.data.length > LIMITS.maxFileBytes)
+    return prisma.importItem.create({ data: { ...base, status: "ERROR", errorCode: "FILE_TOO_LARGE", message: `File vượt quá ${LIMITS.maxFileBytes / 1024 / 1024}MB.`, hint: "Chia nhỏ file ZIP.", processedAt: new Date() } });
+  if (kind === "OTHER")
+    return prisma.importItem.create({ data: { ...base, status: "ERROR", errorCode: "UNSUPPORTED_TYPE", message: "Định dạng file không được hỗ trợ.", hint: "Chỉ hỗ trợ .xml, .pdf, .zip.", processedAt: new Date() } });
+  if (order >= LIMITS.maxFilesPerUpload) throw Errors.validation(`Tối đa ${LIMITS.maxFilesPerUpload} file mỗi lần.`, "Nén thành file ZIP hoặc chia thành nhiều lần tải.");
+  const stored = await storeFile(companyId, actor.id, f.name, f.data, kind);
+  return prisma.importItem.create({ data: { ...base, fileId: stored.id } });
+}
+
+/** Bước 1b': nhận một phần của file lớn; khi đủ phần thì ghép và thêm vào lượt nhập. */
+export async function addChunk(actor: Actor, companyId: string, jobId: string, c: { uploadId: string; index: number; total: number; fileName: string; data: Buffer }) {
+  await getUploadingJob(actor, companyId, jobId);
+  if (!/^[\w-]{1,64}$/.test(c.uploadId) || !Number.isInteger(c.index) || !Number.isInteger(c.total) || c.total < 1 || c.index < 0 || c.index >= c.total)
+    throw Errors.validation("Thông tin phần tải lên không hợp lệ.");
+  if (c.total * CHUNK_BYTES > LIMITS.maxFileBytes + CHUNK_BYTES) throw Errors.validation(`File vượt quá ${LIMITS.maxFileBytes / 1024 / 1024}MB.`, "Chia nhỏ file ZIP.");
+  if (c.data.length > CHUNK_BYTES) throw Errors.validation("Phần tải lên quá lớn.");
+  await prisma.uploadChunk.upsert({
+    where: { jobId_uploadId_index: { jobId, uploadId: c.uploadId, index: c.index } },
+    update: {},
+    create: { jobId, companyId, uploadId: c.uploadId, index: c.index, total: c.total, fileName: c.fileName.slice(0, 500), data: new Uint8Array(c.data) },
+  });
+  const have = await prisma.uploadChunk.count({ where: { jobId, uploadId: c.uploadId } });
+  if (have < c.total) return { complete: false as const };
+  const parts = await prisma.uploadChunk.findMany({ where: { jobId, uploadId: c.uploadId }, orderBy: { index: "asc" } });
+  const deleted = await prisma.uploadChunk.deleteMany({ where: { jobId, uploadId: c.uploadId } });
+  if (deleted.count < c.total) return { complete: false as const }; // request song song khác đã ghép
+  const item = await addFileToJob(actor, companyId, jobId, { name: c.fileName, data: Buffer.concat(parts.map((p) => Buffer.from(p.data))) });
+  return { complete: true as const, itemId: item.id };
+}
+
+/** Bước 1c: xác nhận đã tải xong → chuyển sang chờ xử lý nền. */
+export async function commitJob(actor: Actor, companyId: string, jobId: string) {
+  const job = await getUploadingJob(actor, companyId, jobId);
+  await prisma.uploadChunk.deleteMany({ where: { jobId } });
+  const n = await prisma.importItem.count({ where: { jobId } });
+  if (n === 0) throw Errors.validation("Chưa có file nào được tải lên.", "Kéo thả file XML/PDF/ZIP vào khung tải lên.");
+  await prisma.importJob.update({ where: { id: job.id }, data: { status: "PENDING" } });
+  await refreshJobCounters(jobId);
+  await audit(actor, "import.create", { companyId, entityType: "import_job", entityId: jobId, detail: { files: n } });
+  return prisma.importJob.findUniqueOrThrow({ where: { id: jobId } });
+}
+
+/** Tải lên một lần (dùng cho máy chủ thường & kiểm thử): tạo → thêm file → xác nhận. */
+export async function createImportJob(actor: Actor, companyId: string, files: UploadFile[]) {
+  await assertCanImport(actor, companyId);
   if (files.length === 0) throw Errors.validation("Chưa chọn file nào.", "Kéo thả file XML/PDF/ZIP vào khung tải lên.");
   if (files.length > LIMITS.maxFilesPerUpload) throw Errors.validation(`Tối đa ${LIMITS.maxFilesPerUpload} file mỗi lần.`, "Nén thành file ZIP hoặc chia thành nhiều lần tải.");
-
-  const job = await prisma.importJob.create({ data: { companyId, createdById: actor.id, status: "PENDING" } });
-  let order = 0;
-  for (const f of files) {
-    const kind = detectKind(f.name, f.data);
-    const base = { jobId: job.id, companyId, fileName: f.name, kind, sortOrder: order++ };
-    if (f.data.length > LIMITS.maxFileBytes) {
-      await prisma.importItem.create({ data: { ...base, status: "ERROR", errorCode: "FILE_TOO_LARGE", message: `File vượt quá ${LIMITS.maxFileBytes / 1024 / 1024}MB.`, hint: "Chia nhỏ file ZIP.", processedAt: new Date() } });
-      continue;
-    }
-    if (kind === "OTHER") {
-      await prisma.importItem.create({ data: { ...base, status: "ERROR", errorCode: "UNSUPPORTED_TYPE", message: "Định dạng file không được hỗ trợ.", hint: "Chỉ hỗ trợ .xml, .pdf, .zip.", processedAt: new Date() } });
-      continue;
-    }
-    const stored = await storeFile(companyId, actor.id, f.name, f.data, kind);
-    await prisma.importItem.create({ data: { ...base, fileId: stored.id } });
-  }
-  await refreshJobCounters(job.id);
-  await audit(actor, "import.create", { companyId, entityType: "import_job", entityId: job.id, detail: { files: files.length } });
-  return job;
+  const job = await createEmptyJob(actor, companyId);
+  for (const f of files) await addFileToJob(actor, companyId, job.id, f);
+  return commitJob(actor, companyId, job.id);
 }
 
 export async function refreshJobCounters(jobId: string) {
@@ -301,7 +352,7 @@ export async function claimNextJob(): Promise<string | null> {
     UPDATE import_jobs SET status = 'PROCESSING', heartbeat_at = now(), started_at = COALESCE(started_at, now())
     WHERE id = (
       SELECT id FROM import_jobs
-      WHERE status = 'PENDING' OR (status = 'PROCESSING' AND heartbeat_at < now() - interval '5 minutes')
+      WHERE status = 'PENDING' OR (status = 'PROCESSING' AND heartbeat_at < now() - interval '2 minutes')
       ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1
     ) RETURNING id`;
   return rows[0]?.id ?? null;

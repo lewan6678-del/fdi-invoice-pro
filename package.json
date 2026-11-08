@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "prisma generate && next build",
+    "vercel-build": "prisma generate && prisma migrate deploy && tsx prisma/seed.ts && next build",
     "start": "next start -p ${PORT:-3000}",
     "worker": "tsx src/server/jobs/worker.ts",
     "db:migrate": "prisma migrate deploy",

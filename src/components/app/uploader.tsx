@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Alert, type ApiErrorShape } from "@/components/ui/alert";
 import { JobProgress } from "./job-progress";
 import { cn } from "@/lib/utils";
+import { api, ApiError } from "@/lib/api-client";
 
 const ACCEPT = [".xml", ".pdf", ".zip"];
 const fmtSize = (n: number) => (n > 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
@@ -29,30 +30,46 @@ export function Uploader({ companyId, companyName, disabledReason }: { companyId
     });
   }
 
-  function upload() {
+  async function upload() {
     if (!files.length) return;
     setErr(null);
     setJobId(null);
-    const fd = new FormData();
-    files.forEach((f) => fd.append("files", f, f.name));
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", `/api/imports?companyId=${companyId}`);
-    xhr.upload.onprogress = (e) => e.lengthComputable && setUploadPct(Math.round((e.loaded / e.total) * 100));
-    xhr.onload = () => {
-      setUploadPct(null);
-      let data: { job?: { id: string }; error?: ApiErrorShape } = {};
-      try { data = JSON.parse(xhr.responseText); } catch {}
-      if (xhr.status >= 200 && xhr.status < 300 && data.job) {
-        setJobId(data.job.id);
-        setFiles([]);
-      } else setErr(data.error ?? { message: `Tải lên thất bại (mã ${xhr.status}).`, hint: "Thử lại với ít file hơn hoặc nén thành ZIP." });
-    };
-    xhr.onerror = () => {
-      setUploadPct(null);
-      setErr({ message: "Mất kết nối khi tải lên.", hint: "Kiểm tra mạng rồi thử lại. File đã tải trước đó không bị mất." });
-    };
+    const CHUNK = 3 * 1024 * 1024; // dưới giới hạn 4,5MB/request của Vercel
+    const total = files.reduce((a, f) => a + f.size, 0) || 1;
+    let sent = 0;
     setUploadPct(0);
-    xhr.send(fd);
+    const post = async (url: string, init: RequestInit) => {
+      for (let attempt = 1; ; attempt++) {
+        try {
+          return await api<{ job?: { id: string } }>(url, init);
+        } catch (e) {
+          if (attempt >= 3 || (e instanceof ApiError && e.status > 0 && e.status < 500)) throw e;
+          await new Promise((r) => setTimeout(r, 1000 * attempt));
+        }
+      }
+    };
+    try {
+      const created = await post(`/api/imports?companyId=${companyId}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      const id = created.job!.id;
+      for (const f of files) {
+        const parts = Math.max(1, Math.ceil(f.size / CHUNK));
+        const uploadId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+        for (let i = 0; i < parts; i++) {
+          const blob = f.slice(i * CHUNK, Math.min(f.size, (i + 1) * CHUNK));
+          const qs = new URLSearchParams({ companyId, uploadId, index: String(i), total: String(parts), name: f.name });
+          await post(`/api/imports/${id}/chunk?${qs}`, { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: blob });
+          sent += blob.size;
+          setUploadPct(Math.round((sent / total) * 100));
+        }
+      }
+      await post(`/api/imports/${id}/commit?companyId=${companyId}`, { method: "POST" });
+      setJobId(id);
+      setFiles([]);
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.info : { message: "Tải lên thất bại.", hint: "Kiểm tra mạng rồi thử lại." });
+    } finally {
+      setUploadPct(null);
+    }
   }
 
   const Icon = (n: string) => (n.toLowerCase().endsWith(".zip") ? FileArchive : n.toLowerCase().endsWith(".pdf") ? FileText : FileCode2);

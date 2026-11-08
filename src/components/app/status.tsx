@@ -2,6 +2,7 @@ import { Badge } from "@/components/ui/card";
 
 export function JobStatusBadge({ status }: { status: string }) {
   const m: Record<string, [string, "default" | "blue" | "green" | "amber" | "red"]> = {
+    UPLOADING: ["Đang tải lên", "default"],
     PENDING: ["Đang chờ", "default"],
     PROCESSING: ["Đang xử lý", "blue"],
     COMPLETED: ["Hoàn tất", "green"],

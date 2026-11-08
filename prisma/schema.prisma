@@ -7,7 +7,8 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL") // kết nối trực tiếp cho migrations (Neon: không qua pooler)
 }
 
 enum MemberRole {
@@ -42,6 +43,7 @@ enum FileKind {
 }
 
 enum ImportJobStatus {
+  UPLOADING // đang nhận file (tải lên theo từng phần)
   PENDING
   PROCESSING
   COMPLETED
@@ -300,4 +302,20 @@ model FileBlob {
   createdAt DateTime @default(now()) @map("created_at")
 
   @@map("file_blobs")
+}
+
+/// Phần file tải lên tạm thời (Vercel giới hạn 4,5MB/request). Xóa ngay sau khi ghép xong.
+model UploadChunk {
+  id        String   @id @default(cuid())
+  jobId     String   @map("job_id")
+  companyId String   @map("company_id")
+  uploadId  String   @map("upload_id")
+  index     Int
+  total     Int
+  fileName  String   @map("file_name")
+  data      Bytes
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([jobId, uploadId, index])
+  @@map("upload_chunks")
 }

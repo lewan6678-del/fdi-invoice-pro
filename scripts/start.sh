@@ -9,6 +9,7 @@ case "$DATABASE_URL" in
   *) DATABASE_URL="$DATABASE_URL?connection_limit=5" ;;
 esac
 export DATABASE_URL
+export DIRECT_URL="${DIRECT_URL:-$DATABASE_URL}"
 npx prisma migrate deploy
 npx tsx prisma/seed.ts
 exec npx next start -p "${PORT:-3000}"

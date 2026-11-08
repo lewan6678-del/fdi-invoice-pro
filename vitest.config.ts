@@ -10,6 +10,7 @@ export default defineConfig({
     globalSetup: ["tests/global-setup.ts"],
     env: {
       DATABASE_URL: process.env.TEST_DATABASE_URL ?? "postgresql://postgres:postgres@localhost:5432/fdi_test",
+      DIRECT_URL: process.env.TEST_DATABASE_URL ?? "postgresql://postgres:postgres@localhost:5432/fdi_test",
       STORAGE_DRIVER: process.env.STORAGE_DRIVER ?? "local",
       STORAGE_LOCAL_DIR: "./.test-storage",
     },

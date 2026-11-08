@@ -13,6 +13,7 @@ services:
     ports: ["3000:3000"]
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/fdi
+      DIRECT_URL: postgresql://postgres:postgres@db:5432/fdi
       STORAGE_DRIVER: local
       STORAGE_LOCAL_DIR: /app/storage-data
       JOB_MODE: worker
@@ -25,6 +26,7 @@ services:
     command: ["npm", "run", "worker"]
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/fdi
+      DIRECT_URL: postgresql://postgres:postgres@db:5432/fdi
       STORAGE_DRIVER: local
       STORAGE_LOCAL_DIR: /app/storage-data
     volumes: [files:/app/storage-data]

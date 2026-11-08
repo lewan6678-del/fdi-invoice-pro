@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { MemberRole } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { Errors } from "@/lib/errors";
+import { AppError, Errors } from "@/lib/errors";
 import { audit } from "../audit";
 import { hashPassword, validatePasswordStrength, verifyPassword } from "../auth/password";
 import { requireCompanyRole, requireSystemAdmin } from "../auth/rbac";
@@ -18,11 +18,21 @@ const userCreate = z.object({
 
 const publicUser = { id: true, email: true, name: true, isSystemAdmin: true, isActive: true, lastLoginAt: true, createdAt: true } as const;
 
+export const LOGIN_MAX_FAILS = 10;
+export const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+
 export async function login(email: string, password: string, userAgent?: string | null) {
-  const user = await prisma.user.findUnique({ where: { email: email.trim().toLowerCase() } });
+  const normalized = email.trim().toLowerCase();
+  // Chống dò mật khẩu: khóa tạm theo email khi sai quá nhiều lần trong 15 phút
+  const fails = await prisma.auditLog.count({
+    where: { action: "auth.login_failed", entityId: normalized, createdAt: { gte: new Date(Date.now() - LOGIN_WINDOW_MS) } },
+  });
+  if (fails >= LOGIN_MAX_FAILS)
+    throw new AppError(429, "TOO_MANY_ATTEMPTS", "Đăng nhập sai quá nhiều lần. Tài khoản tạm khóa 15 phút.", "Chờ 15 phút rồi thử lại, hoặc nhờ Quản trị hệ thống đặt lại mật khẩu.");
+  const user = await prisma.user.findUnique({ where: { email: normalized } });
   const ok = user ? await verifyPassword(password, user.passwordHash) : false;
   if (!user || !ok) {
-    await audit(null, "auth.login_failed", { detail: { email } });
+    await audit(null, "auth.login_failed", { entityType: "login", entityId: normalized });
     throw Errors.validation("Email hoặc mật khẩu không đúng.", "Kiểm tra lại bàn phím (Caps Lock, bộ gõ tiếng Việt). Quên mật khẩu: liên hệ Quản trị hệ thống để đặt lại.");
   }
   if (!user.isActive) throw Errors.forbidden("đăng nhập: tài khoản đã bị khóa");
