@@ -8,3 +8,4 @@ test-results/*
 !test-results/screenshots
 *.tsbuildinfo
 next-env.d.ts
+*.zip
