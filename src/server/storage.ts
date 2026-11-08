@@ -6,6 +6,7 @@ import path from "node:path";
  * Lưu trữ đối tượng RIÊNG TƯ cho XML/PDF.
  * - local: thư mục ngoài /public, chỉ đọc qua API có kiểm tra quyền.
  * - s3: S3 / Cloudflare R2 / MinIO (bucket private).
+ * - db: lưu trong PostgreSQL (bảng file_blobs) – cho hosting miễn phí.
  * File được ghi một lần (write-once). Không có hàm ghi đè.
  */
 export interface StorageDriver {
@@ -51,14 +52,15 @@ class S3Storage implements StorageDriver {
     );
   }
   async putIfAbsent(key: string, data: Buffer, contentType: string) {
-    const { PutObjectCommand } = await import("@aws-sdk/client-s3");
+    const { PutObjectCommand, HeadObjectCommand } = await import("@aws-sdk/client-s3");
     const c = await this.clientPromise;
     try {
-      await c.send(new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: data, ContentType: contentType, IfNoneMatch: "*" }));
-    } catch (e) {
-      const status = (e as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
-      if (status !== 412) throw e; // 412 = đã tồn tại
+      await c.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key }));
+      return; // đã tồn tại → không ghi lại (khóa = hash nội dung)
+    } catch {
+      /* chưa tồn tại */
     }
+    await c.send(new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: data, ContentType: contentType }));
   }
   async get(key: string) {
     const { GetObjectCommand } = await import("@aws-sdk/client-s3");
@@ -68,10 +70,26 @@ class S3Storage implements StorageDriver {
   }
 }
 
+/** Lưu file ngay trong PostgreSQL (bảng file_blobs) – dùng cho gói hosting miễn phí. */
+class DbStorage implements StorageDriver {
+  async putIfAbsent(key: string, data: Buffer) {
+    const { prisma } = await import("@/lib/db");
+    await prisma.fileBlob.createMany({ data: [{ key, data: new Uint8Array(data) }], skipDuplicates: true });
+  }
+  async get(key: string) {
+    const { prisma } = await import("@/lib/db");
+    const b = await prisma.fileBlob.findUnique({ where: { key } });
+    if (!b) throw new Error(`Không tìm thấy file: ${key}`);
+    return Buffer.from(b.data);
+  }
+}
+
 let driver: StorageDriver | null = null;
 export function storage(): StorageDriver {
   if (driver) return driver;
-  if (process.env.STORAGE_DRIVER === "s3") {
+  if (process.env.STORAGE_DRIVER === "db") {
+    driver = new DbStorage();
+  } else if (process.env.STORAGE_DRIVER === "s3") {
     if (!process.env.S3_BUCKET) throw new Error("Thiếu cấu hình S3_BUCKET");
     driver = new S3Storage(process.env.S3_BUCKET);
   } else {

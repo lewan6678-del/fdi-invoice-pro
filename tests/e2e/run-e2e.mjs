@@ -6,7 +6,7 @@ const DB = process.env.E2E_DATABASE_URL ?? "postgresql://postgres:postgres@local
 const name = new URL(DB).pathname.slice(1);
 if (!/test/i.test(name)) throw new Error("E2E chỉ chạy trên DB có tên chứa 'test'");
 const PORT = process.env.E2E_PORT ?? "3100";
-const env = { ...process.env, DATABASE_URL: DB, STORAGE_DRIVER: "local", STORAGE_LOCAL_DIR: "./.test-storage/e2e", SEED_DEMO: "true", JOB_MODE: "inline", PORT };
+const env = { ...process.env, DATABASE_URL: DB, STORAGE_DRIVER: process.env.STORAGE_DRIVER ?? "local", STORAGE_LOCAL_DIR: "./.test-storage/e2e", SEED_DEMO: "true", JOB_MODE: "inline", PORT };
 
 const admin = new URL(DB); admin.pathname = "/postgres";
 try {

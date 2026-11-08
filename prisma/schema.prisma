@@ -292,3 +292,12 @@ model AuditLog {
   @@index([companyId, createdAt])
   @@map("audit_logs")
 }
+
+/// Nội dung file gốc khi STORAGE_DRIVER=db (phù hợp hosting miễn phí không có ổ đĩa). Ghi một lần, không cập nhật.
+model FileBlob {
+  key       String   @id
+  data      Bytes
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("file_blobs")
+}

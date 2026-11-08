@@ -64,4 +64,5 @@ Hiển thị “Đang phát triển” trên giao diện, **không có nút gi�
 - Chưa có “quên mật khẩu” qua email (admin đặt lại mật khẩu).
 - PDF chỉ lưu và hiển thị, không đọc nội dung PDF (dữ liệu lấy từ XML).
 - Chưa có xác thực 2 lớp.
-- Image Docker chưa được build thử trong phiên này (Docker Hub giới hạn lượt tải – lỗi 429); build ứng dụng và toàn bộ test đã chạy thành công.
+- Image Docker chưa được build thử trong phiên này (Docker Hub giới hạn lượt tải – lỗi 429); build ứng dụng, script khởi động `scripts/start.sh` và toàn bộ test đã chạy thành công.
+- Gói miễn phí: website ngủ sau 15 phút không dùng (mở lại chờ ~1 phút); dung lượng Neon 0,5 GB.

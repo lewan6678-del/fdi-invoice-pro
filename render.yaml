@@ -1,31 +1,22 @@
-# Render Blueprint – triển khai 1 lần bấm: Dashboard Render → New → Blueprint → chọn repo này.
-# Tạo tự động: PostgreSQL + Web service (Docker) + ổ đĩa riêng tư cho XML/PDF.
-databases:
-  - name: fdi-db
-    plan: basic-256mb
-    databaseName: fdi
+# Render Blueprint – GÓI MIỄN PHÍ.
+# Database + file XML/PDF lưu trên Neon (PostgreSQL miễn phí, bền vững). Website chạy trên Render Free.
+# Khi triển khai, Render sẽ hỏi 2 giá trị: DATABASE_URL (chuỗi kết nối Neon) và SEED_ADMIN_PASSWORD.
 services:
   - type: web
     name: fdi-invoice-pro
     runtime: docker
-    plan: starter
+    plan: free
     healthCheckPath: /api/health
-    disk:
-      name: fdi-files
-      mountPath: /app/storage-data
-      sizeGB: 5
     envVars:
       - key: DATABASE_URL
-        fromDatabase: { name: fdi-db, property: connectionString }
-      - key: COOKIE_SECURE
-        value: "true"
-      - key: STORAGE_DRIVER
-        value: local
-      - key: STORAGE_LOCAL_DIR
-        value: /app/storage-data
-      - key: JOB_MODE
-        value: inline
-      - key: SEED_ADMIN_EMAIL
-        value: admin@fdi.local
+        sync: false
       - key: SEED_ADMIN_PASSWORD
         sync: false
+      - key: SEED_ADMIN_EMAIL
+        value: admin@fdi.local
+      - key: STORAGE_DRIVER
+        value: db
+      - key: JOB_MODE
+        value: inline
+      - key: COOKIE_SECURE
+        value: "true"

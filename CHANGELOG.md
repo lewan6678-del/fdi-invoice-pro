@@ -1,5 +1,11 @@
 # Nhật ký thay đổi
 
+## [0.2.1] – 08/11/2026
+- Triển khai **miễn phí**: Neon (database + file) + Render Free.
+- Thêm driver lưu trữ `db` (bảng `file_blobs`, ghi một lần).
+- Thêm `scripts/start.sh` (tự chuẩn hóa chuỗi kết nối Neon, migrate, seed).
+- Driver S3 kiểm tra tồn tại trước khi ghi (tương thích R2/Supabase).
+
 ## [0.2.0] – 08/11/2026
 
 ### Thêm mới

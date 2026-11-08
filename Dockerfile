@@ -19,4 +19,4 @@ COPY --from=build /app ./
 RUN mkdir -p /app/storage-data
 EXPOSE 3000
 # Tự chạy migration (không xóa dữ liệu) + seed admin (chỉ khi DB chưa có người dùng) rồi khởi động
-CMD ["sh", "-c", "npx prisma migrate deploy && npx tsx prisma/seed.ts && npm run start"]
+CMD ["sh", "scripts/start.sh"]

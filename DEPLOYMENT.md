@@ -2,9 +2,23 @@
 
 Ứng dụng đóng gói sẵn bằng `Dockerfile`; khi khởi động, container tự chạy migration (không xóa dữ liệu) và tạo tài khoản admin nếu DB còn trống.
 
-## Phương án khuyến nghị: Render Blueprint (ít thao tác nhất)
+## Phương án MIỄN PHÍ (mặc định): Neon + Render Free
 
-File `render.yaml` đã có sẵn. Render tự tạo: PostgreSQL, web service (Docker), ổ đĩa riêng tư 5GB cho XML/PDF, chứng chỉ HTTPS.
+| Thành phần | Dịch vụ | Giới hạn gói miễn phí |
+|---|---|---|
+| Database + file XML/PDF | Neon (neon.tech) | 0,5 GB dữ liệu, không tự xóa |
+| Website | Render Free | Ngủ sau 15 phút không dùng; lần mở đầu tiên sau đó chờ ~1 phút |
+
+1. neon.tech → đăng nhập bằng GitHub → tạo project (Region: Singapore) → bấm **Connect** → sao chép chuỗi kết nối `postgresql://...`.
+2. render.com → **New → Blueprint** → chọn repository → dán chuỗi Neon vào `DATABASE_URL`, đặt `SEED_ADMIN_PASSWORD` → **Deploy Blueprint**.
+
+`scripts/start.sh` tự chuyển chuỗi Neon sang kết nối trực tiếp (bỏ `-pooler`) để migration chạy được. File XML/PDF lưu trong bảng `file_blobs` (`STORAGE_DRIVER=db`).
+
+Ước tính dung lượng 0,5 GB: khoảng vài chục nghìn hóa đơn chỉ XML, hoặc vài nghìn hóa đơn có kèm PDF. Khi gần đầy, chuyển `STORAGE_DRIVER=s3` (Cloudflare R2 miễn phí 10 GB) hoặc nâng gói.
+
+## Phương án trả phí: Render Blueprint với ổ đĩa riêng
+
+Sửa `render.yaml`: `plan: starter`, thêm khối `databases` và `disk` (mount `/app/storage-data`), `STORAGE_DRIVER=local`. Website không ngủ, có ổ đĩa riêng 5GB.
 
 1. Đưa mã nguồn lên GitHub (một repository riêng tư).
 2. Trên render.com: **New → Blueprint →** chọn repository → nhập `SEED_ADMIN_PASSWORD` → **Apply**.

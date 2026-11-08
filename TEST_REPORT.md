@@ -6,7 +6,10 @@ Ngày chạy: 08/11/2026 · Môi trường: Claude Code Cloud (Linux, Node 22, P
 
 | Bộ kiểm thử | Kết quả |
 |---|---|
-| Unit + Integration (Vitest, PostgreSQL thật) | **35/35 đạt** |
+| Unit + Integration (Vitest, PostgreSQL thật) – lưu file trên ổ đĩa | **36/36 đạt** |
+| Unit + Integration – lưu file trong database (gói miễn phí, `STORAGE_DRIVER=db`) | **36/36 đạt** |
+| E2E với `STORAGE_DRIVER=db` | **14/14 đạt** |
+| Script khởi động production trên DB trống (migrate + tạo admin + đăng nhập) | **Đạt** |
 | E2E trình duyệt (Playwright, bản build production) | **14/14 đạt** |
 | Build production (`next build`) | **Thành công** |
 | Kiểm tra kiểu TypeScript (`tsc --noEmit`) | **Không lỗi** |

@@ -75,4 +75,4 @@ npm run test:e2e    # build trước: npm run build
 
 ## Triển khai cloud
 
-Xem `DEPLOYMENT.md`. Biến môi trường: `.env.example`.
+Mặc định **miễn phí**: Neon (database + file) + Render Free. Xem `DEPLOYMENT.md`. Biến môi trường: `.env.example`.
