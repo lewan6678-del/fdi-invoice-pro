@@ -1,0 +1,31 @@
+# Render Blueprint – triển khai 1 lần bấm: Dashboard Render → New → Blueprint → chọn repo này.
+# Tạo tự động: PostgreSQL + Web service (Docker) + ổ đĩa riêng tư cho XML/PDF.
+databases:
+  - name: fdi-db
+    plan: basic-256mb
+    databaseName: fdi
+services:
+  - type: web
+    name: fdi-invoice-pro
+    runtime: docker
+    plan: starter
+    healthCheckPath: /api/health
+    disk:
+      name: fdi-files
+      mountPath: /app/storage-data
+      sizeGB: 5
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase: { name: fdi-db, property: connectionString }
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: STORAGE_DRIVER
+        value: local
+      - key: STORAGE_LOCAL_DIR
+        value: /app/storage-data
+      - key: JOB_MODE
+        value: inline
+      - key: SEED_ADMIN_EMAIL
+        value: admin@fdi.local
+      - key: SEED_ADMIN_PASSWORD
+        sync: false

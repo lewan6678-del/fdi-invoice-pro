@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { MemberRole } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { Errors } from "@/lib/errors";
 import { isValidTaxCode, normalizeTaxCode } from "@/lib/taxcode";
@@ -41,7 +42,7 @@ export async function listCompaniesForActor(actor: Actor, opts: { includeInactiv
   });
   return companies.map((c) => ({
     ...c,
-    myRole: actor.isSystemAdmin ? ("SYSTEM_ADMIN" as const) : (c.memberships as { role: string }[])[0]?.role,
+    myRole: actor.isSystemAdmin ? ("SYSTEM_ADMIN" as const) : (c.memberships as { role: MemberRole }[])[0]?.role ?? null,
   }));
 }
 

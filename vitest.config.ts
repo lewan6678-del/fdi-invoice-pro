@@ -12,7 +12,6 @@ export default defineConfig({
       DATABASE_URL: process.env.TEST_DATABASE_URL ?? "postgresql://postgres:postgres@localhost:5432/fdi_test",
       STORAGE_DRIVER: "local",
       STORAGE_LOCAL_DIR: "./.test-storage",
-      SESSION_SECRET: "test-secret-test-secret-test-secret",
     },
   },
 });
