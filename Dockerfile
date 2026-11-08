@@ -15,8 +15,8 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production PORT=3000
 COPY --from=build /app ./
-RUN mkdir -p /app/storage-data && chown -R node:node /app/storage-data
-USER node
+# Chạy bằng root để ghi được vào ổ đĩa gắn ngoài (Render disk mount tại /app/storage-data)
+RUN mkdir -p /app/storage-data
 EXPOSE 3000
 # Tự chạy migration (không xóa dữ liệu) + seed admin (chỉ khi DB chưa có người dùng) rồi khởi động
 CMD ["sh", "-c", "npx prisma migrate deploy && npx tsx prisma/seed.ts && npm run start"]
