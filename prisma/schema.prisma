@@ -1,0 +1,294 @@
+// FDI Invoice & Tax Automation Pro – Database schema (PostgreSQL)
+// Mọi bảng nghiệp vụ đều có company_id để cô lập dữ liệu theo doanh nghiệp (tenant isolation).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum MemberRole {
+  COMPANY_ADMIN
+  EDITOR
+  VIEWER
+}
+
+enum InvoiceDirection {
+  PURCHASE // Mua vào: công ty là người mua
+  SALE     // Bán ra: công ty là người bán
+}
+
+enum InvoiceNature {
+  ORIGINAL    // Hóa đơn gốc
+  REPLACEMENT // Hóa đơn thay thế (TCHDon = 1)
+  ADJUSTMENT  // Hóa đơn điều chỉnh (TCHDon = 2)
+}
+
+enum InvoiceStatus {
+  ACTIVE      // Đang hiệu lực (mặc định khi nhập)
+  REPLACED    // Đã bị thay thế
+  ADJUSTED    // Đã bị điều chỉnh
+  CANCELLED   // Đã hủy
+}
+
+enum FileKind {
+  XML
+  PDF
+  ZIP
+  OTHER
+}
+
+enum ImportJobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum ImportItemStatus {
+  PENDING
+  SUCCESS
+  DUPLICATE
+  ERROR
+  SKIPPED
+}
+
+model User {
+  id            String       @id @default(cuid())
+  email         String       @unique
+  name          String
+  passwordHash  String       @map("password_hash")
+  isSystemAdmin Boolean      @default(false) @map("is_system_admin")
+  isActive      Boolean      @default(true) @map("is_active")
+  lastLoginAt   DateTime?    @map("last_login_at")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+  sessions      Session[]
+  memberships   Membership[]
+
+  @@map("users")
+}
+
+model Session {
+  id        String   @id // SHA-256 của token, token gốc chỉ nằm trong cookie
+  userId    String   @map("user_id")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  userAgent String?  @map("user_agent")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model Company {
+  id                   String       @id @default(cuid())
+  taxCode              String       @unique @map("tax_code")
+  name                 String
+  englishName          String?      @map("english_name")
+  address              String
+  fiscalYearStartMonth Int          @default(1) @map("fiscal_year_start_month")
+  currentFiscalYear    Int          @map("current_fiscal_year")
+  investorCountry      String?      @map("investor_country")
+  email                String?
+  phone                String?
+  isActive             Boolean      @default(true) @map("is_active")
+  createdAt            DateTime     @default(now()) @map("created_at")
+  updatedAt            DateTime     @updatedAt @map("updated_at")
+  memberships          Membership[]
+  invoices             Invoice[]
+  files                StoredFile[]
+  importJobs           ImportJob[]
+
+  @@map("companies")
+}
+
+model Membership {
+  id        String     @id @default(cuid())
+  userId    String     @map("user_id")
+  companyId String     @map("company_id")
+  role      MemberRole
+  createdAt DateTime   @default(now()) @map("created_at")
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company   Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, companyId])
+  @@index([companyId])
+  @@map("memberships")
+}
+
+/// File gốc (XML/PDF/ZIP) – BẤT BIẾN: chỉ ghi một lần, không cập nhật nội dung.
+model StoredFile {
+  id           String   @id @default(cuid())
+  companyId    String   @map("company_id")
+  kind         FileKind
+  originalName String   @map("original_name")
+  storageKey   String   @unique @map("storage_key")
+  sha256       String
+  size         Int
+  mimeType     String   @map("mime_type")
+  uploadedById String?  @map("uploaded_by_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+  company      Company  @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  xmlInvoices  Invoice[] @relation("InvoiceXml")
+  pdfInvoices  Invoice[] @relation("InvoicePdf")
+
+  @@unique([companyId, sha256])
+  @@map("stored_files")
+}
+
+model ImportJob {
+  id             String          @id @default(cuid())
+  companyId      String          @map("company_id")
+  createdById    String?         @map("created_by_id")
+  status         ImportJobStatus @default(PENDING)
+  totalItems     Int             @default(0) @map("total_items")
+  processedItems Int             @default(0) @map("processed_items")
+  successCount   Int             @default(0) @map("success_count")
+  duplicateCount Int             @default(0) @map("duplicate_count")
+  errorCount     Int             @default(0) @map("error_count")
+  note           String?
+  createdAt      DateTime        @default(now()) @map("created_at")
+  startedAt      DateTime?       @map("started_at")
+  heartbeatAt    DateTime?       @map("heartbeat_at")
+  finishedAt     DateTime?       @map("finished_at")
+  company        Company         @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  items          ImportItem[]
+
+  @@index([companyId, createdAt])
+  @@index([status])
+  @@map("import_jobs")
+}
+
+model ImportItem {
+  id            String           @id @default(cuid())
+  jobId         String           @map("job_id")
+  companyId     String           @map("company_id")
+  fileName      String           @map("file_name")
+  archiveName   String?          @map("archive_name")
+  kind          FileKind
+  fileId        String?          @map("file_id")
+  status        ImportItemStatus @default(PENDING)
+  errorCode     String?          @map("error_code")
+  message       String?
+  hint          String?
+  sortOrder     Int              @default(0) @map("sort_order")
+  invoiceId     String?          @map("invoice_id")
+  createdAt     DateTime         @default(now()) @map("created_at")
+  processedAt   DateTime?        @map("processed_at")
+  job           ImportJob        @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@index([companyId])
+  @@map("import_items")
+}
+
+model Invoice {
+  id                String           @id @default(cuid())
+  companyId         String           @map("company_id")
+  direction         InvoiceDirection
+  nature            InvoiceNature    @default(ORIGINAL)
+  status            InvoiceStatus    @default(ACTIVE)
+  standard          String?          // TT78 / TT32 ...
+  invoiceName       String?          @map("invoice_name")
+  templateCode      String           @map("template_code") // KHMSHDon
+  series            String           // KHHDon
+  number            String           // SHDon
+  issueDate         DateTime         @map("issue_date") @db.Date
+  currency          String           @default("VND")
+  exchangeRate      Decimal          @default(1) @map("exchange_rate") @db.Decimal(18, 6)
+  paymentMethod     String?          @map("payment_method")
+  taxAuthorityCode  String?          @map("tax_authority_code") // MCCQT
+  sellerName        String           @map("seller_name")
+  sellerTaxCode     String           @map("seller_tax_code")
+  sellerAddress     String?          @map("seller_address")
+  buyerName         String?          @map("buyer_name")
+  buyerFullName     String?          @map("buyer_full_name")
+  buyerTaxCode      String?          @map("buyer_tax_code")
+  buyerAddress      String?          @map("buyer_address")
+  totalBeforeTax    Decimal          @map("total_before_tax") @db.Decimal(20, 4)
+  totalTax          Decimal          @map("total_tax") @db.Decimal(20, 4)
+  totalDiscount     Decimal          @default(0) @map("total_discount") @db.Decimal(20, 4)
+  totalPayment      Decimal          @map("total_payment") @db.Decimal(20, 4)
+  totalInWords      String?          @map("total_in_words")
+  // Thông tin hóa đơn liên quan (điều chỉnh / thay thế)
+  relatedTemplateCode String?        @map("related_template_code")
+  relatedSeries       String?        @map("related_series")
+  relatedNumber       String?        @map("related_number")
+  relatedIssueDate    DateTime?      @map("related_issue_date") @db.Date
+  relatedNote         String?        @map("related_note")
+  relatedInvoiceId    String?        @map("related_invoice_id")
+  relatedInvoice      Invoice?       @relation("InvoiceRelation", fields: [relatedInvoiceId], references: [id], onDelete: SetNull)
+  derivedInvoices     Invoice[]      @relation("InvoiceRelation")
+  xmlFileId         String?          @map("xml_file_id")
+  pdfFileId         String?          @map("pdf_file_id")
+  xmlFile           StoredFile?      @relation("InvoiceXml", fields: [xmlFileId], references: [id], onDelete: Restrict)
+  pdfFile           StoredFile?      @relation("InvoicePdf", fields: [pdfFileId], references: [id], onDelete: SetNull)
+  importJobId       String?          @map("import_job_id")
+  createdById       String?          @map("created_by_id")
+  createdAt         DateTime         @default(now()) @map("created_at")
+  updatedAt         DateTime         @updatedAt @map("updated_at")
+  company           Company          @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  lines             InvoiceLine[]
+  taxSummaries      InvoiceTaxSummary[]
+
+  @@unique([companyId, sellerTaxCode, templateCode, series, number], name: "invoice_identity")
+  @@index([companyId, issueDate])
+  @@index([companyId, direction, issueDate])
+  @@map("invoices")
+}
+
+model InvoiceLine {
+  id             String   @id @default(cuid())
+  invoiceId      String   @map("invoice_id")
+  companyId      String   @map("company_id")
+  lineNo         Int      @map("line_no")
+  nature         Int      @default(1) // TChat: 1 HH/DV, 2 KM, 3 CK thương mại, 4 ghi chú
+  itemCode       String?  @map("item_code")
+  itemName       String   @map("item_name")
+  unit           String?
+  quantity       Decimal? @db.Decimal(24, 6)
+  unitPrice      Decimal? @map("unit_price") @db.Decimal(24, 6)
+  discountRate   Decimal? @map("discount_rate") @db.Decimal(9, 4)
+  discountAmount Decimal? @map("discount_amount") @db.Decimal(20, 4)
+  amount         Decimal  @db.Decimal(20, 4)
+  taxRate        String?  @map("tax_rate") // "10%", "8%", "5%", "0%", "KCT", "KKKNT", "KHAC:x%"
+  taxAmount      Decimal? @map("tax_amount") @db.Decimal(20, 4)
+  invoice        Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@index([companyId])
+  @@map("invoice_lines")
+}
+
+model InvoiceTaxSummary {
+  id            String  @id @default(cuid())
+  invoiceId     String  @map("invoice_id")
+  companyId     String  @map("company_id")
+  taxRate       String  @map("tax_rate")
+  taxableAmount Decimal @map("taxable_amount") @db.Decimal(20, 4)
+  taxAmount     Decimal @map("tax_amount") @db.Decimal(20, 4)
+  invoice       Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@index([companyId])
+  @@map("invoice_tax_summaries")
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  companyId  String?  @map("company_id")
+  userId     String?  @map("user_id")
+  userEmail  String?  @map("user_email")
+  action     String
+  entityType String?  @map("entity_type")
+  entityId   String?  @map("entity_id")
+  detail     Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([companyId, createdAt])
+  @@map("audit_logs")
+}
